@@ -1,0 +1,364 @@
+{
+  "schema_version": 1,
+  "profile_name": "custom-template",
+  "description": "Editable Steam Log Scrubber custom ruleset template. Copy this file, rename it, and adjust only the rules you understand.",
+  "output": {
+    "replacement": "REDACTED",
+    "preserve_line_structure": true,
+    "report_redaction_counts": true,
+    "report_detected_values": false
+  },
+  "builtins": {
+    "steam_account_name_discovery": {
+      "enabled": true,
+      "redact_discovered_names_globally": true,
+      "redact_positional_login_events": true,
+      "min_length": 3,
+      "max_length": 64
+    },
+    "identity": {
+      "enabled": true,
+      "redact_emails": true
+    },
+    "steam_ids": {
+      "enabled": true,
+      "redact_steamid64": true,
+      "redact_steam3_nonzero": true,
+      "preserve_steam3_zero": true,
+      "preserve_steamid_zero": true
+    },
+    "credentials": {
+      "enabled": true,
+      "redact_auth_fields": true,
+      "redact_cookies": true,
+      "redact_tickets": true,
+      "redact_ssfn": true,
+      "redact_bearer_basic_headers": true
+    },
+    "network": {
+      "enabled": true,
+      "redact_private_ips": true,
+      "redact_public_ip_ports": true,
+      "redact_public_ips_in_high_network_logs": false,
+      "redact_labeled_public_ips": false,
+      "redact_ip_url_hosts": true,
+      "redact_labeled_ipv6": true,
+      "preserve_loopback": true,
+      "preserve_zero_placeholders": true,
+      "preserve_steam_infrastructure": true
+    },
+    "urls": {
+      "enabled": true,
+      "redact_video_tracking_urls": true,
+      "redact_sensitive_query_values": true,
+      "redact_non_steam_urls_in_high_network_logs": true
+    },
+    "hardware_identifiers": {
+      "enabled": true,
+      "redact_mac_addresses": true,
+      "redact_labeled_private_guids": true,
+      "preserve_com_guids": true
+    },
+    "paths": {
+      "enabled": true,
+      "redact_home_username": true,
+      "redact_full_home_paths": false
+    }
+  },
+  "file_classes": {
+    "high_network": [
+      "connection_log.txt",
+      "remote_connections.txt",
+      "transport_client.txt",
+      "transport_steamui.txt",
+      "content_log.txt",
+      "console-linux.txt",
+      "console-linux.previous.txt",
+      "console_log.txt",
+      "console_log.previous.txt",
+      "cloud_log.txt",
+      "cloud_log.previous.txt",
+      "webhelper.txt",
+      "webhelper-linux.txt",
+      "webhelper_js.txt",
+      "webhelper_gpu.txt",
+      "cef_log.txt",
+      "steamui_html.txt",
+      "client_networkmanager.txt",
+      "steamnetworkingsockets_log.txt",
+      "systemmanager.txt"
+    ]
+  },
+  "domain_policy": {
+    "preserve_domains": [
+      "steamstatic.com",
+      "steamcontent.com",
+      "steampowered.com",
+      "steamcommunity.com",
+      "steamserver.net",
+      "valvesoftware.com",
+      "steamloopback.host",
+      "steamconnecttest.com",
+      "localhost",
+      "disabled.invalid",
+      "chromestatus.com",
+      "chromium.org",
+      "[www.chromium.org](http://www.chromium.org)",
+      "developer.chrome.com",
+      "specifications.freedesktop.org"
+    ],
+    "redact_domains": [
+      "youtube.com",
+      "youtu.be",
+      "googlevideo.com"
+    ]
+  },
+  "query_policy": {
+    "sensitive_query_keys": [
+      "access_token",
+      "refresh_token",
+      "token",
+      "session",
+      "sessionid",
+      "auth",
+      "oauth",
+      "key",
+      "apikey",
+      "api_key",
+      "password",
+      "passwd",
+      "secret",
+      "steamid",
+      "accountid",
+      "ticket",
+      "webcookie",
+      "login",
+      "LOCAL_HOSTNAME",
+      "local_hostname",
+      "CLIENT_SESSION",
+      "client_session"
+    ]
+  },
+  "field_policy": {
+    "sensitive_field_keys": [
+      "oauth",
+      "access_token",
+      "refresh_token",
+      "sessionid",
+      "machineauth",
+      "loginkey",
+      "apikey",
+      "api_key",
+      "ticket",
+      "webcookie",
+      "sentry",
+      "client_secret",
+      "deviceid",
+      "device_id",
+      "machineid",
+      "machine_id",
+      "installid",
+      "install_id",
+      "sessionkey",
+      "session_key"
+    ],
+    "account_field_keys": [
+      "accountid",
+      "account_id",
+      "steamid",
+      "steam_id",
+      "steamid64",
+      "personaname",
+      "persona_name",
+      "accountname",
+      "account_name",
+      "loginusername",
+      "login_user",
+      "userid",
+      "user_id"
+    ],
+    "private_guid_keys": [
+      "machine_guid",
+      "user_guid",
+      "device_guid",
+      "deviceguid",
+      "install_guid",
+      "installguid",
+      "client_guid",
+      "clientguid",
+      "account_guid",
+      "accountguid"
+    ]
+  },
+  "discovery_rules": [
+    {
+      "id": "custom_discovery_example_disabled",
+      "description": "Disabled example. Enable and edit this to discover a repeated custom value from a specific log pattern.",
+      "enabled": false,
+      "scope": "all_text_files",
+      "include_files": [
+        "*.txt",
+        "*.log"
+      ],
+      "exclude_files": [],
+      "regex": "ExampleEvent\\s+([A-Za-z0-9_.-]{3,64})",
+      "capture_group": 1,
+      "value_type": "custom_identity"
+    },
+    {
+      "id": "steamui_on_login_state_change",
+      "description": "Discover Steam account names from SteamUI login-state events.",
+      "enabled": true,
+      "scope": "all_text_files",
+      "regex": "\\bOnLoginStateChange\\s+([A-Za-z0-9_.-]{3,64})(?=\\s+[-0-9])",
+      "capture_group": 1,
+      "value_type": "steam_account_name"
+    },
+    {
+      "id": "steam_account_name_labeled",
+      "description": "Discover Steam account/persona names from labeled fields.",
+      "enabled": true,
+      "scope": "all_text_files",
+      "regex": "\\b(?:AccountName|account_name|accountname|PersonaName|persona_name|personaname|LoginUserName|loginusername)\\b\\s*[:=]\\s*['\\\"]?([A-Za-z0-9_.-]{3,64})",
+      "capture_group": 1,
+      "value_type": "steam_account_name",
+      "flags": [
+        "ignorecase"
+      ]
+    }
+  ],
+  "preserve_rules": [
+    {
+      "id": "dotnet_version",
+      "description": "Do not treat .NET version strings as IP addresses.",
+      "enabled": true,
+      "scope": "all_text_files",
+      "regex": "\\bVersion=\\d+\\.\\d+\\.\\d+\\.\\d+\\b"
+    },
+    {
+      "id": "public_key_token",
+      "description": "Do not redact .NET PublicKeyToken values.",
+      "enabled": true,
+      "scope": "all_text_files",
+      "regex": "\\bPublicKeyToken=[A-Fa-f0-9]+\\b"
+    },
+    {
+      "id": "certificate_oid",
+      "description": "Do not treat certificate OIDs as IP addresses.",
+      "enabled": true,
+      "scope": "all_text_files",
+      "regex": "\\b(?:\\d+\\.){4,}\\d+\\b"
+    },
+    {
+      "id": "braced_com_guid",
+      "description": "Do not redact generic COM/.NET interface GUIDs.",
+      "enabled": true,
+      "scope": "all_text_files",
+      "regex": "\\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\\}"
+    },
+    {
+      "id": "custom_preserve_example_disabled",
+      "description": "Disabled example. Enable and edit this to protect a known-safe diagnostic string before redaction runs.",
+      "enabled": false,
+      "scope": "all_text_files",
+      "regex": "KnownSafeDiagnosticValue=[A-Za-z0-9_.-]+"
+    }
+  ],
+  "redaction_rules": [
+    {
+      "id": "custom_redaction_example_disabled",
+      "description": "Disabled example. Enable and edit this for a game-specific or support-server-specific edge case.",
+      "enabled": false,
+      "phase": "after_builtin",
+      "scope": "all_text_files",
+      "include_files": [
+        "*.txt",
+        "*.log"
+      ],
+      "exclude_files": [],
+      "regex": "SensitiveExample=([^\\s]+)",
+      "replacement": "SensitiveExample=REDACTED",
+      "risk": "custom"
+    },
+    {
+      "id": "steamui_on_login_state_change_inline",
+      "description": "Redact the account-name position in SteamUI login-state events even if discovery fails.",
+      "enabled": true,
+      "phase": "before_builtin",
+      "scope": "all_text_files",
+      "regex": "(\\bOnLoginStateChange\\s+)([A-Za-z0-9_.-]{3,64})(?=\\s+[-0-9])",
+      "replacement": "\\1REDACTED",
+      "risk": "identity"
+    },
+    {
+      "id": "jwt_value",
+      "description": "Redact JWT-labeled values from connection/login messages.",
+      "enabled": true,
+      "phase": "before_builtin",
+      "scope": "all_text_files",
+      "regex": "(\\bUsing JWT\\s+)[^,\\s]+",
+      "replacement": "\\1REDACTED",
+      "risk": "credential"
+    },
+    {
+      "id": "external_address_value",
+      "description": "Redact external address values reported by Steam connectivity checks.",
+      "enabled": true,
+      "phase": "before_builtin",
+      "scope": "high_network",
+      "regex": "(\\bexternal address\\s*=\\s*['\\\"]?)[^'\\\"\\s]+(['\\\"]?)",
+      "replacement": "\\1REDACTED\\2",
+      "risk": "network_identity"
+    },
+    {
+      "id": "lost_device_ip",
+      "description": "Redact IP addresses from network-device loss events.",
+      "enabled": true,
+      "phase": "before_builtin",
+      "scope": "high_network",
+      "regex": "(\\bLost device with IP\\s+)[^\\s]+",
+      "replacement": "\\1REDACTED",
+      "risk": "network_identity"
+    },
+    {
+      "id": "proxy_upload_value",
+      "description": "Redact proxy values from crash/upload helper lines.",
+      "enabled": true,
+      "phase": "before_builtin",
+      "scope": "all_text_files",
+      "regex": "(\\[proxy\\s+['\\\"])[^'\\\"]+(['\\\"]\\])",
+      "replacement": "\\1REDACTED\\2",
+      "risk": "network_identity"
+    },
+    {
+      "id": "home_path_username_pre_builtin",
+      "description": "Redact local Linux home usernames before other rules process paths.",
+      "enabled": true,
+      "phase": "before_builtin",
+      "scope": "all_text_files",
+      "regex": "/home/[^/\\s:;,)'\\\"]+",
+      "replacement": "/home/REDACTED",
+      "risk": "local_identity"
+    },
+    {
+      "id": "local_hostname_query_value",
+      "description": "Redact local hostnames embedded in Steam loopback URLs.",
+      "enabled": true,
+      "phase": "before_builtin",
+      "scope": "all_text_files",
+      "regex": "([?&]LOCAL_HOSTNAME=)[^&\\s:)]+",
+      "replacement": "\\1REDACTED",
+      "risk": "local_identity"
+    },
+    {
+      "id": "client_session_query_value",
+      "description": "Redact Steam client session identifiers embedded in Steam loopback URLs.",
+      "enabled": true,
+      "phase": "before_builtin",
+      "scope": "all_text_files",
+      "regex": "([?&]CLIENT_SESSION=)[^&\\s:)]+",
+      "replacement": "\\1REDACTED",
+      "risk": "session_identifier"
+    }
+  ]
+}
