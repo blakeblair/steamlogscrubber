@@ -1249,6 +1249,7 @@ def scrub_folder(
     rules: dict[str, Any],
     dry_run: bool = False,
     force: bool = False,
+    progress_callback: Any | None = None,
 ) -> ScrubResult:
     input_path = Path(input_dir).expanduser().resolve()
     output_path = Path(output_dir).expanduser().resolve()
@@ -1279,25 +1280,24 @@ def scrub_folder(
         result.output_backup = backup_existing_output(output_path, force=force)
         output_path.mkdir(parents=True, exist_ok=True)
 
+    files_to_process: list[Path] = []
+
     for root, _, files in os.walk(input_path):
         root_path = Path(root)
-        relative_root = root_path.relative_to(input_path)
-
-        if not dry_run:
-            out_root = output_path / relative_root
-            out_root.mkdir(parents=True, exist_ok=True)
 
         for filename in files:
-            in_file = root_path / filename
-            relative_path = str(in_file.relative_to(input_path))
+            files_to_process.append(root_path / filename)
 
-            result.files_scanned += 1
+    total_files = len(files_to_process)
 
-            try:
-                data = in_file.read_bytes()
-            except OSError as exc:
-                result.warnings.append(f"Could not read {relative_path}: {exc}")
-                continue
+    for index, in_file in enumerate(files_to_process, start=1):
+        relative_path = str(in_file.relative_to(input_path))
+        filename = in_file.name
+
+        result.files_scanned += 1
+
+        try:
+            data = in_file.read_bytes()
 
             if is_binary(data):
                 result.binary_files += 1
@@ -1326,9 +1326,17 @@ def scrub_folder(
                 out_file.write_bytes(encode_text(scrubbed_text))
                 shutil.copystat(in_file, out_file)
 
-            # Per-file delta is not currently exposed, but keeping the before snapshot
-            # here makes it easy to add later without changing the public API.
             _ = before_counts
+
+        except OSError as exc:
+            result.warnings.append(f"Could not read {relative_path}: {exc}")
+
+        finally:
+            if progress_callback is not None:
+                try:
+                    progress_callback(index, total_files, relative_path)
+                except Exception as exc:
+                    result.warnings.append(f"Progress callback failed for {relative_path}: {exc}")
 
     result.redaction_counts = dict(sorted(context.redaction_counts.items()))
     result.redactions = sum(context.redaction_counts.values())
@@ -1337,8 +1345,6 @@ def scrub_folder(
     if not dry_run:
         result.leftovers = scan_leftovers(output_path, context)
     else:
-        # Dry runs do not write output. To avoid creating temp trees here, report only
-        # known rule/config warnings and aggregate counts.
         result.leftovers = []
 
     return result

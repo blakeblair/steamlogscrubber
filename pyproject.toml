@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "steamlogscrubber"
-version = "0.1.1"
+version = "0.2.0"
 description = "Steam and Proton log scrubber for safe support sharing."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -26,6 +26,7 @@ classifiers = [
 
 [project.scripts]
 steamlogscrub = "steamlogscrubber.cli:main"
+steamlogscrub-gui = "steamlogscrubber.gui:main"
 
 [project.urls]
 Homepage = "https://github.com/blakeblair/steamlogscrubber"
@@ -35,4 +36,4 @@ Repository = "https://github.com/blakeblair/steamlogscrubber"
 where = ["src"]
 
 [tool.setuptools.package-data]
-steamlogscrubber = ["rules/*.steamlogscrub.json"]
+steamlogscrubber = ["rules/*.steamlogscrub.json", "assets/*.gif"]

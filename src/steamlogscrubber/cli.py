@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime
+import json
 import os
 import re
 import tempfile
@@ -371,12 +372,29 @@ def run_scrub(args: argparse.Namespace) -> int:
     try:
         rules = load_rules(paths.rules_path)
 
+        def emit_json_progress(current: int, total: int, relative_path: str) -> None:
+            if not args.json_progress:
+                return
+
+            print(
+                json.dumps(
+                    {
+                        "type": "progress",
+                        "current": current,
+                        "total": total,
+                        "file": relative_path,
+                    }
+                ),
+                flush=True,
+            )
+
         result = scrub_folder(
             input_dir=paths.input_dir,
             output_dir=paths.output_dir,
             rules=rules,
             dry_run=args.dry_run,
             force=args.force,
+            progress_callback=emit_json_progress if args.json_progress else None,
         )
 
         archive_paths: list[Path] = []
@@ -507,9 +525,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--json-progress",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+
+    parser.add_argument(
         "--version",
         action="version",
-        version=f"{APP_NAME} 0.1.1",
+        version=f"{APP_NAME} 0.2.0",
     )
 
     return parser
