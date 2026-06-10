@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime
+import os
 import re
+import tempfile
 import shutil
 import sys
 from dataclasses import dataclass
@@ -49,6 +51,7 @@ class CliPaths:
     input_dir: Path
     output_dir: Path
     rules_path: Path
+    cleanup_dir: Path | None = None
 
 
 def safe_ruleset_name(name: str) -> str:
@@ -73,18 +76,119 @@ def safe_ruleset_name(name: str) -> str:
     return cleaned
 
 
-def find_default_steam_logs() -> Path | None:
+def find_default_steam_log_dirs() -> list[Path]:
     candidates = [
         Path.home() / ".local" / "share" / "Steam" / "logs",
         Path.home() / ".steam" / "steam" / "logs",
     ]
 
+    seen: set[Path] = set()
+    found: list[Path] = []
+
     for candidate in candidates:
         if candidate.is_dir():
-            return candidate
+            resolved = candidate.resolve()
+            if resolved not in seen:
+                found.append(resolved)
+                seen.add(resolved)
 
-    return None
+    return found
 
+
+def find_default_steam_logs() -> Path | None:
+    dirs = find_default_steam_log_dirs()
+    return dirs[0] if dirs else None
+
+
+def find_proton_log_files() -> list[Path]:
+    roots = [Path.home()]
+
+    proton_log_dir = os.environ.get("PROTON_LOG_DIR")
+    if proton_log_dir:
+        roots.append(Path(proton_log_dir).expanduser())
+
+    seen: set[Path] = set()
+    found: list[Path] = []
+
+    for root in roots:
+        if not root.is_dir():
+            continue
+
+        for pattern in ("steam-*.log", "Steam-*.log"):
+            for candidate in root.glob(pattern):
+                if not candidate.is_file():
+                    continue
+
+                resolved = candidate.resolve()
+                if resolved not in seen:
+                    found.append(resolved)
+                    seen.add(resolved)
+
+    return found
+
+
+def copy_tree_contents(source: Path, destination: Path) -> int:
+    copied = 0
+
+    for path in source.rglob("*"):
+        if not path.is_file():
+            continue
+
+        relative = path.relative_to(source)
+        out_path = destination / relative
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            shutil.copy2(path, out_path)
+        except OSError:
+            continue
+
+        copied += 1
+
+    return copied
+
+
+def copy_single_file_unique(source: Path, destination_dir: Path) -> bool:
+    destination_dir.mkdir(parents=True, exist_ok=True)
+
+    destination = destination_dir / source.name
+    if destination.exists():
+        stem = source.stem
+        suffix = source.suffix
+        counter = 2
+
+        while destination.exists():
+            destination = destination_dir / f"{stem}-{counter}{suffix}"
+            counter += 1
+
+    try:
+        shutil.copy2(source, destination)
+    except OSError:
+        return False
+
+    return True
+
+
+def build_auto_input_bundle() -> tuple[Path, Path]:
+    bundle = Path(tempfile.mkdtemp(prefix="steamlogscrub-input-"))
+    copied = 0
+
+    for index, logs_dir in enumerate(find_default_steam_log_dirs(), start=1):
+        copied += copy_tree_contents(logs_dir, bundle / f"steam-logs-{index}")
+
+    proton_dest = bundle / "proton-logs"
+    for proton_log in find_proton_log_files():
+        if copy_single_file_unique(proton_log, proton_dest):
+            copied += 1
+
+    if copied == 0:
+        shutil.rmtree(bundle, ignore_errors=True)
+        raise FileNotFoundError(
+            "Could not auto-detect Steam or Proton logs. "
+            "Provide an input folder, for example: steamlogscrub ~/.local/share/Steam/logs"
+        )
+
+    return bundle, bundle
 
 def require_file(path: Path, description: str) -> Path:
     if not path.is_file():
@@ -135,16 +239,13 @@ def make_default_output_dir() -> Path:
 def resolve_paths(args: argparse.Namespace) -> CliPaths:
     ensure_app_folders()
 
+    cleanup_dir: Path | None = None
+
     if args.input:
         input_dir = Path(args.input).expanduser().resolve()
     else:
-        detected = find_default_steam_logs()
-        if detected is None:
-            raise FileNotFoundError(
-                "Could not auto-detect Steam logs. "
-                "Provide an input folder, for example: steamlogscrub ~/.local/share/Steam/logs"
-            )
-        input_dir = detected.resolve()
+        input_dir, cleanup_dir = build_auto_input_bundle()
+        input_dir = input_dir.resolve()
 
     if not input_dir.is_dir():
         raise NotADirectoryError(f"Input folder does not exist: {input_dir}")
@@ -162,6 +263,7 @@ def resolve_paths(args: argparse.Namespace) -> CliPaths:
         input_dir=input_dir,
         output_dir=output_dir,
         rules_path=rules_path,
+        cleanup_dir=cleanup_dir,
     )
 
 
@@ -250,6 +352,8 @@ def print_result(result: object, archive_paths: list[Path] | None, dry_run: bool
 
 
 def run_scrub(args: argparse.Namespace) -> int:
+    paths: CliPaths | None = None
+
     try:
         paths = resolve_paths(args)
     except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
@@ -314,6 +418,9 @@ def run_scrub(args: argparse.Namespace) -> int:
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    finally:
+        if paths is not None and paths.cleanup_dir is not None:
+            shutil.rmtree(paths.cleanup_dir, ignore_errors=True)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -402,7 +509,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version=f"{APP_NAME} 0.1.0",
+        version=f"{APP_NAME} 0.1.1",
     )
 
     return parser
