@@ -10,7 +10,7 @@ import sys
 import threading
 from pathlib import Path
 import tkinter as tk
-from tkinter import messagebox, scrolledtext, ttk
+from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 from . import cli
 
@@ -82,10 +82,11 @@ class SteamLogScrubberGui:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Steam Log Scrubber")
-        self.root.geometry("720x560")
-        self.root.minsize(640, 500)
+        self.root.geometry("720x620")
+        self.root.minsize(640, 560)
 
         self.rules_var = tk.StringVar(value="Default")
+        self.input_var = tk.StringVar(value="")
         self.dry_run_var = tk.BooleanVar(value=False)
         self.no_archive_var = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar(value="Ready.")
@@ -132,7 +133,25 @@ class SteamLogScrubberGui:
         controls = ttk.Frame(frame)
         controls.pack(fill="x")
 
-        ttk.Label(controls, text="Ruleset").grid(row=0, column=0, sticky="w")
+        ttk.Label(controls, text="Input folder (optional)").grid(row=0, column=0, sticky="w")
+
+        input_entry = ttk.Entry(
+            controls,
+            textvariable=self.input_var,
+            width=56,
+        )
+        input_entry.grid(row=1, column=0, sticky="ew", pady=(4, 12))
+
+        browse_button = ttk.Button(
+            controls,
+            text="Browse...",
+            command=self.choose_input_folder,
+        )
+        browse_button.grid(row=1, column=1, sticky="w", padx=(12, 0), pady=(4, 12))
+
+        controls.columnconfigure(0, weight=1)
+
+        ttk.Label(controls, text="Ruleset").grid(row=2, column=0, sticky="w")
 
         rules = ttk.Combobox(
             controls,
@@ -141,32 +160,44 @@ class SteamLogScrubberGui:
             state="readonly",
             width=24,
         )
-        rules.grid(row=1, column=0, sticky="w", pady=(4, 12))
+        rules.grid(row=3, column=0, sticky="w", pady=(4, 12))
 
         template_button = ttk.Button(
             controls,
             text="Open custom template",
             command=self.open_template,
         )
-        template_button.grid(row=1, column=1, sticky="w", padx=(12, 0), pady=(4, 12))
+        template_button.grid(row=3, column=1, sticky="w", padx=(12, 0), pady=(4, 12))
 
         dry_run = ttk.Checkbutton(
             controls,
             text="Dry run",
             variable=self.dry_run_var,
         )
-        dry_run.grid(row=2, column=0, sticky="w", pady=(0, 8))
+        dry_run.grid(row=4, column=0, sticky="w", pady=(0, 8))
 
         no_archive = ttk.Checkbutton(
             controls,
             text="No archive",
             variable=self.no_archive_var,
         )
-        no_archive.grid(row=2, column=1, sticky="w", padx=(12, 0), pady=(0, 8))
+        no_archive.grid(row=4, column=1, sticky="w", padx=(12, 0), pady=(0, 8))
+
+        if os.name == "nt":
+            hint_text = (
+                "Leave input blank for Steam logs. Include a game's detectable logs with "
+                "its Windows Steam launch option: --steamlogscrubber"
+            )
+        else:
+            hint_text = (
+                "Leave input blank for Steam logs and all detected Proton logs. "
+                "Enable a game's Proton log with: PROTON_LOG=1 %command%"
+            )
 
         hint = ttk.Label(
             frame,
-            text="Proton logs require the Steam launch option: PROTON_LOG=1 %command%",
+            text=hint_text,
+            wraplength=680,
         )
         hint.pack(anchor="w", pady=(6, 12))
 
@@ -271,8 +302,17 @@ class SteamLogScrubberGui:
             messagebox.showerror("Editor error", str(exc))
             self.status_var.set("Could not open template.")
 
+    def choose_input_folder(self) -> None:
+        selected = filedialog.askdirectory(title="Choose a folder of logs to scrub")
+        if selected:
+            self.input_var.set(selected)
+
     def start_scrub(self) -> None:
         args: list[str] = []
+
+        input_folder = self.input_var.get().strip()
+        if input_folder:
+            args.append(input_folder)
 
         args.extend(RULE_CHOICES.get(self.rules_var.get(), []))
 
