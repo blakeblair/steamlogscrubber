@@ -24,6 +24,7 @@ import re
 import tempfile
 import shutil
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -39,7 +40,22 @@ STRICT_RULES = RULES_DIR / f"strict{RULE_EXT}"
 RELAXED_RULES = RULES_DIR / f"relaxed{RULE_EXT}"
 TEMPLATE_RULES = RULES_DIR / f"custom.template{RULE_EXT}"
 
-DOCUMENTS_DIR = Path.home() / "Documents"
+def find_documents_dir() -> Path:
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            buffer = ctypes.create_unicode_buffer(32768)
+            result = ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buffer)
+            if result == 0 and buffer.value:
+                return Path(buffer.value)
+        except (AttributeError, OSError):
+            pass
+
+    return Path.home() / "Documents"
+
+
+DOCUMENTS_DIR = find_documents_dir()
 APP_DOCUMENTS_DIR = DOCUMENTS_DIR / "steamlogscrubber"
 SCRUBBED_LOGS_DIR = APP_DOCUMENTS_DIR / "scrubbedlogs"
 USER_CONFIG_DIR = APP_DOCUMENTS_DIR / "custom_scrubrules"
@@ -77,11 +93,78 @@ def safe_ruleset_name(name: str) -> str:
     return cleaned
 
 
-def find_default_steam_log_dirs() -> list[Path]:
-    candidates = [
-        Path.home() / ".local" / "share" / "Steam" / "logs",
-        Path.home() / ".steam" / "steam" / "logs",
-    ]
+def find_windows_steam_install_dirs() -> list[Path]:
+    if os.name != "nt":
+        return []
+
+    candidates: list[Path] = []
+
+    try:
+        import winreg
+
+        registry_locations = [
+            (winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam", "SteamPath"),
+            (winreg.HKEY_LOCAL_MACHINE, r"Software\Valve\Steam", "InstallPath"),
+        ]
+        registry_views = {
+            0,
+            getattr(winreg, "KEY_WOW64_32KEY", 0),
+            getattr(winreg, "KEY_WOW64_64KEY", 0),
+        }
+
+        for root, key_name, value_name in registry_locations:
+            for registry_view in registry_views:
+                try:
+                    access = winreg.KEY_READ | registry_view
+                    with winreg.OpenKey(root, key_name, 0, access) as key:
+                        value, _ = winreg.QueryValueEx(key, value_name)
+                except OSError:
+                    continue
+
+                if isinstance(value, str) and value.strip():
+                    candidates.append(Path(value.strip()))
+    except ImportError:
+        pass
+
+    for variable in ("PROGRAMFILES(X86)", "PROGRAMFILES"):
+        value = os.environ.get(variable)
+        if value:
+            candidates.append(Path(value) / "Steam")
+
+    seen: set[Path] = set()
+    found: list[Path] = []
+
+    for candidate in candidates:
+        try:
+            resolved = candidate.expanduser().resolve()
+        except OSError:
+            continue
+
+        if resolved not in seen:
+            found.append(resolved)
+            seen.add(resolved)
+
+    return found
+
+
+def find_default_steam_log_dirs(
+    platform_name: str | None = None,
+    windows_install_dirs: Iterable[Path] | None = None,
+) -> list[Path]:
+    platform = os.name if platform_name is None else platform_name
+
+    if platform == "nt":
+        install_dirs = (
+            list(windows_install_dirs)
+            if windows_install_dirs is not None
+            else find_windows_steam_install_dirs()
+        )
+        candidates = [install_dir / "logs" for install_dir in install_dirs]
+    else:
+        candidates = [
+            Path.home() / ".local" / "share" / "Steam" / "logs",
+            Path.home() / ".steam" / "steam" / "logs",
+        ]
 
     seen: set[Path] = set()
     found: list[Path] = []
@@ -128,6 +211,17 @@ def find_proton_log_files() -> list[Path]:
     return found
 
 
+def select_archive_types(
+    args: argparse.Namespace,
+    platform_name: str | None = None,
+) -> tuple[bool, bool]:
+    platform = os.name if platform_name is None else platform_name
+    windows_default_zip = platform == "nt" and not args.zip and not args.zip_only
+    make_tar = not args.zip_only and not windows_default_zip
+    make_zip = args.zip or args.zip_only or windows_default_zip
+    return make_tar, make_zip
+
+
 def copy_tree_contents(source: Path, destination: Path) -> int:
     copied = 0
 
@@ -170,6 +264,38 @@ def copy_single_file_unique(source: Path, destination_dir: Path) -> bool:
     return True
 
 
+def copy_windows_opted_in_game_logs(
+    destination: Path,
+    steam_install_dirs: Iterable[Path] | None = None,
+) -> int:
+    from .windows_games import find_opted_in_game_logs
+
+    install_dirs = (
+        list(steam_install_dirs)
+        if steam_install_dirs is not None
+        else find_windows_steam_install_dirs()
+    )
+    copied = 0
+
+    for game_log in find_opted_in_game_logs(install_dirs):
+        output = (
+            destination
+            / "windows-game-logs"
+            / f"app-{game_log.app_id}"
+            / game_log.relative_path
+        )
+        output.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            shutil.copy2(game_log.path, output)
+        except OSError:
+            continue
+
+        copied += 1
+
+    return copied
+
+
 def build_auto_input_bundle() -> tuple[Path, Path]:
     bundle = Path(tempfile.mkdtemp(prefix="steamlogscrub-input-"))
     copied = 0
@@ -181,6 +307,9 @@ def build_auto_input_bundle() -> tuple[Path, Path]:
     for proton_log in find_proton_log_files():
         if copy_single_file_unique(proton_log, proton_dest):
             copied += 1
+
+    if os.name == "nt":
+        copied += copy_windows_opted_in_game_logs(bundle)
 
     if copied == 0:
         shutil.rmtree(bundle, ignore_errors=True)
@@ -400,10 +529,11 @@ def run_scrub(args: argparse.Namespace) -> int:
         archive_paths: list[Path] = []
 
         if not args.dry_run and not args.no_archive:
+            make_tar, make_zip = select_archive_types(args)
             archive_paths = create_archives(
                 source_dir=paths.output_dir,
-                make_tar=not args.zip_only,
-                make_zip=args.zip or args.zip_only,
+                make_tar=make_tar,
+                make_zip=make_zip,
                 output_dir=paths.output_dir.parent,
                 backup_existing=True,
             )
@@ -515,7 +645,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--zip-only",
         action="store_true",
-        help="Create only a .zip archive, not .tar.xz.",
+        help="Create only a .zip archive, not .tar.xz. This is the default on Windows.",
     )
 
     parser.add_argument(
@@ -533,7 +663,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version=f"{APP_NAME} 0.2.0",
+        version=f"{APP_NAME} 0.3.0",
     )
 
     return parser
